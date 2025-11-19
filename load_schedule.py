@@ -1,0 +1,164 @@
+import os
+import typer
+import boto3
+import psycopg2
+from dotenv import load_dotenv
+from typing import Optional
+from sshtunnel import SSHTunnelForwarder
+
+# Load environment variables
+load_dotenv()
+
+app = typer.Typer()
+
+def upload_to_s3(file_path: str) -> Optional[str]:
+    """Uploads a file to S3 and returns the S3 path (s3://bucket/key)."""
+    bucket_name = os.getenv("S3_BUCKET_NAME")
+    if not bucket_name:
+        print("Error: S3_BUCKET_NAME not set in environment variables.")
+        return None
+
+    s3_client = boto3.client(
+        's3',
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        region_name=os.getenv("AWS_REGION")
+    )
+
+    file_name = os.path.basename(file_path)
+    object_name = f"data/coe_bidding_schedule/{file_name}"
+
+    try:
+        print(f"Uploading {file_path} to s3://{bucket_name}/{object_name}...")
+        s3_client.upload_file(file_path, bucket_name, object_name)
+        return f"s3://{bucket_name}/{object_name}"
+    except Exception as e:
+        print(f"Error uploading to S3: {e}")
+        return None
+
+def _get_redshift_connection(host, port, dbname, user, password):
+    """Helper to create psycopg2 connection."""
+    return psycopg2.connect(
+        host=host,
+        port=port,
+        dbname=dbname,
+        user=user,
+        password=password
+    )
+
+def load_to_redshift(s3_path: str):
+    """Loads data from S3 to Redshift, optionally via SSH tunnel."""
+    host = os.getenv("REDSHIFT_HOST")
+    port = int(os.getenv("REDSHIFT_PORT", "5439"))
+    dbname = os.getenv("REDSHIFT_DB")
+    user = os.getenv("REDSHIFT_USER")
+    password = os.getenv("REDSHIFT_PASSWORD")
+    iam_role = os.getenv("REDSHIFT_IAM_ROLE")
+    
+    # SSH Config
+    ssh_host = os.getenv("SSH_HOST")
+    ssh_user = os.getenv("SSH_USER")
+    ssh_key_path = os.getenv("SSH_KEY_PATH")
+    ssh_port = int(os.getenv("SSH_PORT", "22"))
+
+    if not all([host, dbname, user, password, iam_role]):
+        print("Error: Redshift configuration missing in environment variables.")
+        return
+
+    conn = None
+    server = None
+
+    try:
+        # Check if SSH tunnel is needed
+        if ssh_host and ssh_user and ssh_key_path:
+            print(f"Establishing SSH tunnel to {ssh_host}...")
+            server = SSHTunnelForwarder(
+                (ssh_host, ssh_port),
+                ssh_username=ssh_user,
+                ssh_pkey=ssh_key_path,
+                remote_bind_address=(host, port)
+            )
+            server.start()
+            print(f"SSH tunnel established. Local bind port: {server.local_bind_port}")
+            
+            # Connect using local forwarded port
+            conn = _get_redshift_connection(
+                host="127.0.0.1",
+                port=server.local_bind_port,
+                dbname=dbname,
+                user=user,
+                password=password
+            )
+        else:
+            print("Connecting directly to Redshift...")
+            conn = _get_redshift_connection(
+                host=host,
+                port=port,
+                dbname=dbname,
+                user=user,
+                password=password
+            )
+
+        cur = conn.cursor()
+
+        # 1. Create table if not exists
+        print("Creating table public.coe_bidding_schedule if not exists...")
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS public.coe_bidding_schedule (
+            month VARCHAR(255),
+            exercise_start_datetime TIMESTAMPTZ,
+            exercise_end_datetime TIMESTAMPTZ
+        );
+        """
+        cur.execute(create_table_query)
+
+        # 2. Copy data from S3
+        print(f"Copying data from {s3_path} to Redshift...")
+        copy_query = f"""
+        COPY public.coe_bidding_schedule
+        FROM '{s3_path}'
+        IAM_ROLE '{iam_role}'
+        FORMAT AS JSON 'auto'
+        TIMEFORMAT 'auto';
+        """
+        cur.execute(copy_query)
+        
+        conn.commit()
+        print("Redshift load completed successfully.")
+        
+        cur.close()
+
+    except Exception as e:
+        print(f"Error loading to Redshift: {e}")
+    finally:
+        if conn:
+            conn.close()
+        if server:
+            print("Closing SSH tunnel...")
+            server.stop()
+
+@app.command()
+def main(
+    file_path: str = typer.Argument(..., help="Path to the JSONL file to load"),
+    upload_s3: bool = typer.Option(True, "--upload-s3/--no-upload-s3", help="Upload to S3"),
+    load_redshift: bool = typer.Option(True, "--load-redshift/--no-load-redshift", help="Load to Redshift")
+):
+    """
+    Upload COE bidding schedule JSONL to S3 and load into Redshift.
+    """
+    # Check if file exists
+    if not os.path.exists(file_path):
+        print(f"Error: File not found: {file_path}")
+        return
+
+    s3_path = None
+    if upload_s3:
+        s3_path = upload_to_s3(file_path)
+    
+    if load_redshift and s3_path:
+        load_to_redshift(s3_path)
+    elif load_redshift and not s3_path:
+        print("Skipping Redshift load because S3 upload failed or was skipped.")
+
+if __name__ == "__main__":
+    app()

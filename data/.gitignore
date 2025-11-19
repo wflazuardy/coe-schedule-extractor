@@ -1,0 +1,4 @@
+*
+schedule_pdf/*
+!schedule_pdf/
+!.gitignore
