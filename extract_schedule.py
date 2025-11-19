@@ -1,16 +1,17 @@
-import os
 import base64
 import json
+import os
+from datetime import datetime
+from enum import Enum
+from typing import List, Optional
+
 import fitz  # pymupdf
+import typer
 from dotenv import load_dotenv
-from openai import OpenAI
 from google import genai
 from google.genai import types
+from openai import OpenAI
 from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
-import typer
-from enum import Enum
 
 # Load environment variables
 load_dotenv()
@@ -192,4 +193,3 @@ def main(
 
 if __name__ == "__main__":
     app()
-

@@ -1,9 +1,10 @@
 import os
-import typer
+from typing import Optional
+
 import boto3
 import psycopg2
+import typer
 from dotenv import load_dotenv
-from typing import Optional
 from sshtunnel import SSHTunnelForwarder
 
 # Load environment variables
