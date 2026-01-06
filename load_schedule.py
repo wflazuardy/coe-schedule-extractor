@@ -1,4 +1,6 @@
 import os
+import re
+from enum import Enum
 from typing import Optional
 
 import boto3
@@ -12,8 +14,48 @@ load_dotenv()
 
 app = typer.Typer()
 
+
+class LoadMode(str, Enum):
+    APPEND = "append"
+    REPLACE = "replace"
+
+
+def extract_year_from_filename(file_path: str) -> Optional[int]:
+    """Extract year from a COE schedule filename.
+
+    Parses the filename to find a 4-digit year pattern.
+
+    Args:
+        file_path: Path to the file (can be full path or just filename).
+
+    Returns:
+        The extracted year as an integer, or None if no year found.
+
+    Examples:
+        >>> extract_year_from_filename("COE_Bidding_Schedule_2025.jsonl")
+        2025
+        >>> extract_year_from_filename("data/schedule.jsonl")
+        None
+    """
+    filename = os.path.basename(file_path)
+    match = re.search(r'(\d{4})', filename)
+    if match:
+        return int(match.group(1))
+    return None
+
+
 def upload_to_s3(file_path: str) -> Optional[str]:
-    """Uploads a file to S3 and returns the S3 path (s3://bucket/key)."""
+    """Upload a file to S3.
+
+    Uploads the specified file to the configured S3 bucket under
+    the 'data/coe_bidding_schedule/' prefix.
+
+    Args:
+        file_path: Local path to the file to upload.
+
+    Returns:
+        The S3 URI (s3://bucket/key) if successful, None otherwise.
+    """
     bucket_name = os.getenv("S3_BUCKET_NAME")
     if not bucket_name:
         print("Error: S3_BUCKET_NAME not set in environment variables.")
@@ -37,8 +79,22 @@ def upload_to_s3(file_path: str) -> Optional[str]:
         print(f"Error uploading to S3: {e}")
         return None
 
-def _get_redshift_connection(host, port, dbname, user, password):
-    """Helper to create psycopg2 connection."""
+
+def _get_redshift_connection(
+    host: str, port: int, dbname: str, user: str, password: str
+) -> psycopg2.extensions.connection:
+    """Create a psycopg2 connection to Redshift.
+
+    Args:
+        host: Redshift cluster endpoint hostname.
+        port: Redshift cluster port.
+        dbname: Database name.
+        user: Database username.
+        password: Database password.
+
+    Returns:
+        A psycopg2 connection object.
+    """
     return psycopg2.connect(
         host=host,
         port=port,
@@ -47,8 +103,21 @@ def _get_redshift_connection(host, port, dbname, user, password):
         password=password
     )
 
-def load_to_redshift(s3_path: str):
-    """Loads data from S3 to Redshift, optionally via SSH tunnel."""
+
+def load_to_redshift(
+    s3_path: str, mode: LoadMode = LoadMode.APPEND, year: Optional[int] = None
+) -> None:
+    """Load data from S3 into Redshift.
+
+    Connects to Redshift (optionally via SSH tunnel) and loads JSONL data
+    from S3 using the COPY command.
+
+    Args:
+        s3_path: S3 URI to the JSONL file (e.g., 's3://bucket/path/file.jsonl').
+        mode: Load mode - APPEND adds data, REPLACE deletes existing year's
+            data before loading.
+        year: Year to replace when mode is REPLACE. Required for REPLACE mode.
+    """
     host = os.getenv("REDSHIFT_HOST")
     port = int(os.getenv("REDSHIFT_PORT", "5439"))
     dbname = os.getenv("REDSHIFT_DB")
@@ -113,7 +182,20 @@ def load_to_redshift(s3_path: str):
         """
         cur.execute(create_table_query)
 
-        # 2. Copy data from S3
+        # 2. Delete existing data if in replace mode
+        if mode == LoadMode.REPLACE:
+            if year:
+                print(f"Deleting existing data for year {year}...")
+                delete_query = f"""
+                DELETE FROM public.coe_bidding_schedule
+                WHERE month LIKE '%{year}%';
+                """
+                cur.execute(delete_query)
+                print(f"Deleted rows matching year {year}.")
+            else:
+                print("Warning: Replace mode specified but no year provided. Skipping delete.")
+
+        # 3. Copy data from S3
         print(f"Copying data from {s3_path} to Redshift...")
         copy_query = f"""
         COPY public.coe_bidding_schedule
@@ -142,7 +224,8 @@ def load_to_redshift(s3_path: str):
 def main(
     file_path: str = typer.Argument(..., help="Path to the JSONL file to load"),
     upload_s3: bool = typer.Option(True, "--upload-s3/--no-upload-s3", help="Upload to S3"),
-    load_redshift: bool = typer.Option(True, "--load-redshift/--no-load-redshift", help="Load to Redshift")
+    load_redshift: bool = typer.Option(True, "--load-redshift/--no-load-redshift", help="Load to Redshift"),
+    mode: LoadMode = typer.Option(LoadMode.APPEND, "--mode", "-m", help="Load mode: 'append' adds data, 'replace' deletes existing year's data first")
 ):
     """
     Upload COE bidding schedule JSONL to S3 and load into Redshift.
@@ -152,12 +235,17 @@ def main(
         print(f"Error: File not found: {file_path}")
         return
 
+    # Extract year from filename for replace mode
+    year = extract_year_from_filename(file_path)
+    if mode == LoadMode.REPLACE and not year:
+        print("Warning: Could not extract year from filename. Replace mode may not work correctly.")
+
     s3_path = None
     if upload_s3:
         s3_path = upload_to_s3(file_path)
     
     if load_redshift and s3_path:
-        load_to_redshift(s3_path)
+        load_to_redshift(s3_path, mode=mode, year=year)
     elif load_redshift and not s3_path:
         print("Skipping Redshift load because S3 upload failed or was skipped.")
 

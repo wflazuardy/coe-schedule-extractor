@@ -75,8 +75,21 @@ uv run load_schedule.py data/COE_Bidding_Schedule_2025.jsonl
 ```
 
 **Options:**
+-   `--mode` / `-m`: Load mode (default: `append`)
+    - `append`: Simply adds new data to the table (default behavior)
+    - `replace`: Deletes existing rows for the same year before loading (prevents duplicates)
 -   `--no-upload-s3`: Skip S3 upload.
 -   `--no-load-redshift`: Skip Redshift load.
+
+**Example: Adding 2026 data without affecting 2025:**
+```bash
+uv run load_schedule.py data/COE_Bidding_Schedule_2026.jsonl --mode append
+```
+
+**Example: Replacing 2026 data (deletes existing 2026 rows first):**
+```bash
+uv run load_schedule.py data/COE_Bidding_Schedule_2026.jsonl --mode replace
+```
 
 **SSH Tunneling**:
 If `SSH_HOST`, `SSH_USER`, and `SSH_KEY_PATH` are set in your `.env` file, the script will automatically establish an SSH tunnel to the bastion host and forward the Redshift connection through it.
