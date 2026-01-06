@@ -108,7 +108,7 @@ def extract_with_gemini(images: List[str], prompt_text: str) -> Optional[Schedul
     try:
         print("Sending request to Gemini...")
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=[types.Content(role="user", parts=parts)],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -152,7 +152,7 @@ def save_to_jsonl(schedule_data: ScheduleResponse, output_dir: str) -> str:
 @app.command()
 def main(
     pdf_path: str = typer.Argument(..., help="Path to the PDF file to process"),
-    provider: Provider = typer.Option(Provider.OPENAI, "--provider", "-p", help="AI provider to use (openai or gemini)"),
+    provider: Provider = typer.Option(Provider.GEMINI, "--provider", "-p", help="AI provider to use (openai or gemini)"),
     output_dir: str = typer.Option("data", "--output-dir", "-o", help="Directory to save the output JSONL file")
 ):
     """

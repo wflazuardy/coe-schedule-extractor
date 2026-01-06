@@ -54,14 +54,14 @@ The process is split into two steps: Extraction and Loading.
 ### Step 1: Extraction
 Run the `extract_schedule.py` script to extract data from the PDF and save it locally as a JSONL file.
 
-**Basic Usage (Defaults to OpenAI):**
+**Basic Usage (Defaults to Gemini):**
 ```bash
 uv run extract_schedule.py data/schedule_pdf/COE_Bidding_Schedule_for_Year_2025.pdf
 ```
 
-**Using Google Gemini:**
+**Using OpenAI:**
 ```bash
-uv run extract_schedule.py data/schedule_pdf/COE_Bidding_Schedule_for_Year_2025.pdf --provider gemini
+uv run extract_schedule.py data/schedule_pdf/COE_Bidding_Schedule_for_Year_2025.pdf --provider openai
 ```
 
 **Output:**
