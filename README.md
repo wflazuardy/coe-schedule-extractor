@@ -39,6 +39,7 @@ This tool extracts Certificate of Entitlement (COE) bidding schedules from PDF d
     REDSHIFT_USER=your_db_user
     REDSHIFT_PASSWORD=your_db_password
     REDSHIFT_IAM_ROLE=arn:aws:iam::123456789012:role/MyRedshiftRole
+    REDSHIFT_TABLE=public.coe_bidding_schedule  # Optional, defaults to public.coe_bidding_schedule
 
     # SSH Tunnel Config (Required if connecting via bastion)
     SSH_HOST=your_bastion_host_ip

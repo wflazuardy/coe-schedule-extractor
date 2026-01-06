@@ -124,7 +124,8 @@ def load_to_redshift(
     user = os.getenv("REDSHIFT_USER")
     password = os.getenv("REDSHIFT_PASSWORD")
     iam_role = os.getenv("REDSHIFT_IAM_ROLE")
-    
+    table = os.getenv("REDSHIFT_TABLE")
+
     # SSH Config
     ssh_host = os.getenv("SSH_HOST")
     ssh_user = os.getenv("SSH_USER")
@@ -172,9 +173,9 @@ def load_to_redshift(
         cur = conn.cursor()
 
         # 1. Create table if not exists
-        print("Creating table public.coe_bidding_schedule if not exists...")
-        create_table_query = """
-        CREATE TABLE IF NOT EXISTS public.coe_bidding_schedule (
+        print(f"Creating table {table} if not exists...")
+        create_table_query = f"""
+        CREATE TABLE IF NOT EXISTS {table} (
             month VARCHAR(255),
             exercise_start_datetime TIMESTAMPTZ,
             exercise_end_datetime TIMESTAMPTZ
@@ -187,7 +188,7 @@ def load_to_redshift(
             if year:
                 print(f"Deleting existing data for year {year}...")
                 delete_query = f"""
-                DELETE FROM public.coe_bidding_schedule
+                DELETE FROM {table}
                 WHERE month LIKE '%{year}%';
                 """
                 cur.execute(delete_query)
@@ -198,7 +199,7 @@ def load_to_redshift(
         # 3. Copy data from S3
         print(f"Copying data from {s3_path} to Redshift...")
         copy_query = f"""
-        COPY public.coe_bidding_schedule
+        COPY {table}
         FROM '{s3_path}'
         IAM_ROLE '{iam_role}'
         FORMAT AS JSON 'auto'
